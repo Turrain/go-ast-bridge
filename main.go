@@ -421,6 +421,7 @@ func websocketSendReceive(uri string, data map[string]interface{}, conn net.Conn
 		}()
 
 		wsConn, _, err := websocket.DefaultDialer.Dial(uri, nil)
+		audioWriter := &AudioWriter{conn: conn}
 		if err != nil {
 			log.Println("Failed to connect to WebSocket:", err)
 			return
@@ -461,7 +462,7 @@ func websocketSendReceive(uri string, data map[string]interface{}, conn net.Conn
 					}
 				case websocket.BinaryMessage:
 					log.Println("Received binary message:")
-					if _, err := conn.Write(audiosocket.SlinMessage(message)); err != nil {
+					if _, err := audioWriter.Write(message); err != nil {
 						log.Println("Error writing to connection:", err)
 						return
 					}
@@ -471,6 +472,23 @@ func websocketSendReceive(uri string, data map[string]interface{}, conn net.Conn
 			}
 		}
 	}()
+}
+
+type AudioWriter struct {
+	mutex sync.Mutex
+	conn  net.Conn
+}
+
+func (aw *AudioWriter) Write(p []byte) (n int, err error) {
+	aw.mutex.Lock()
+	defer aw.mutex.Unlock()
+
+	n, err = aw.conn.Write(audiosocket.SlinMessage(p))
+	if err != nil {
+		return n, err
+	}
+
+	return n, nil
 }
 
 // func noiseGate(samples []float64, threshold float64) []float64 {
