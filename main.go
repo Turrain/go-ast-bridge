@@ -25,7 +25,7 @@ import (
 )
 
 const slinChunkSize = 320 // 8000Hz * 20ms * 2 bytes
-const websocketURI = "ws://localhost:8001/ws"
+const websocketURI = "ws://localhost:8011/ws"
 const listenAddr = ":9092"
 
 var API = NewChatAPI("http://127.0.0.1:8009/api")
@@ -89,7 +89,6 @@ func Handle(pCtx context.Context, c net.Conn) {
 
 	ChatID := id.String()
 	chat, err := API.GetChat(ChatID)
-	llmChat := LLM.GetChat(ChatID)
 
 	if err != nil {
 		log.Println("chat session doesn't exist, creating new one")
@@ -99,6 +98,20 @@ func Handle(pCtx context.Context, c net.Conn) {
 			return
 		}
 	}
+	sttSettings, err := API.GetSttSettings(ChatID)
+	if err != nil {
+		log.Println("failed to get stt settings:", err)
+		return
+	}
+	log.Println("STT Settings:", *sttSettings)
+	llmSettings, err := API.GetLlmSettings(ChatID)
+	if err != nil {
+		log.Println("failed to get llm settings:", err)
+		return
+	}
+	log.Println("LLM Settings:", *llmSettings)
+
+	llmChat := LLM.GetChat(ChatID)
 
 	if llmChat == nil {
 		log.Println("creating new llm chat")
@@ -110,16 +123,13 @@ func Handle(pCtx context.Context, c net.Conn) {
 	}
 	llmChat = LLM.GetChat(ChatID)
 	llmChat.DeleteAllMessages()
-	whisperSettings := chat.STTSettings
-	whisperSettings.Temperature = 0.2
-	whisperSettings.Language = "ru"
-	llmSettings := chat.LLMSettings
+	log.Println("LLM Settings:", *llmSettings)
 	messages := chat.Messages
 
 	systemRole := "system"
 	systemMessage := ollama.Message{
 		Role:    &systemRole,
-		Content: &llmSettings.SystemPrompt,
+		Content: llmSettings.SystemPrompt,
 	}
 	llmChat.AddMessage(systemMessage)
 	for _, message := range messages {
@@ -173,7 +183,7 @@ func Handle(pCtx context.Context, c net.Conn) {
 				if silenceCount > silenceThreshold {
 					if len(inputAudioBuffer) > 0 {
 						log.Println("Processing complete sentence")
-						handleInputAudio(c, inputAudioBuffer, ChatID, whisperSettings, llmSettings)
+						handleInputAudio(c, inputAudioBuffer, ChatID, *sttSettings, *llmSettings)
 						inputAudioBuffer = nil // Reset buffer
 					}
 				}
@@ -194,24 +204,23 @@ func handleInputAudio(conn net.Conn, buffer [][]float32, chatID string, sttSetti
 		log.Println("Audio length is less than 0.45 seconds, skipping processing.")
 		return
 	}
-	transcription, err := sendFloat32ArrayToServer("http://localhost:8002/complete_transcribe_r", mergedBuffer, STTSettings{
-		Language:    sttSettings.Language,
-		Temperature: sttSettings.Temperature,
-	})
+	sttSettings.Language = "ru"
+	transcription, err := sendFloat32ArrayToServer("http://localhost:8002/complete_transcribe_r", mergedBuffer, sttSettings)
 	if err != nil {
 		log.Println("Error sending data to server:", err)
 		return
 	}
 
 	llmOptions := ollama.Options{
-		NumPredict:    &llmSettings.NumPredict,
-		TopK:          &llmSettings.TopK,
-		TopP:          &llmSettings.TopP,
-		TfsZ:          &llmSettings.TfsZ,
-		RepeatLastN:   &llmSettings.RepeatLastN,
-		RepeatPenalty: &llmSettings.RepeatPenalty,
-		Temperature:   &llmSettings.Temperature,
-		NumCtx:        &llmSettings.NumCtx,
+		Seed:          llmSettings.Seed,
+		Mirostat:      llmSettings.Mirostat,
+		MirostatEta:   llmSettings.MirostatEta,
+		MirostatTau:   llmSettings.MirostatTau,
+		NumCtx:        llmSettings.NumCtx,
+		RepeatLastN:   llmSettings.RepeatLastN,
+		RepeatPenalty: llmSettings.RepeatPenalty,
+		TfsZ:          llmSettings.TfsZ,
+		NumPredict:    llmSettings.NumPredict,
 	}
 	log.Println("LLM Options:", llmOptions)
 	excludedWords := []string{"Продолжение следует...", "Субтитры сделал DimaTorzok", "Субтитры создавал DimaTorzok"}
@@ -231,11 +240,12 @@ func handleInputAudio(conn net.Conn, buffer [][]float32, chatID string, sttSetti
 	res, err := LLM.Chat(
 		&chatID,
 		LLM.Chat.WithModel("gemma2:9b"),
+
 		LLM.Chat.WithMessage(ollama.Message{
 			Role:    &UserSender,
 			Content: &transcription,
 		}),
-		// LLM.Chat.WithOptions(llmOptions),
+		LLM.Chat.WithOptions(llmOptions),
 	)
 	if err != nil {
 		log.Println("Error generating Ollama chat:", err)
@@ -249,11 +259,12 @@ func handleInputAudio(conn net.Conn, buffer [][]float32, chatID string, sttSetti
 	}
 
 	data := map[string]interface{}{
-		"message":  res.Message.Content,
+		"message":  *res.Message.Content,
 		"language": "ru",
 		"speed":    1.0,
 	}
 	log.Println("Using transcription:", transcription)
+
 	websocketSendReceive(websocketURI, data, conn)
 
 }

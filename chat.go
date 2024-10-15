@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+type Optional[T any] struct {
+	Defined bool
+	Value   *T
+}
+
 type User struct {
 	ID        uint      `json:"id"`
 	Username  string    `json:"username"`
@@ -25,36 +30,37 @@ type Chat struct {
 	EndTime     *time.Time             `json:"endTime,omitempty"`
 	Messages    []Message              `json:"messages,omitempty"`
 	Settings    map[string]interface{} `json:"settings,omitempty"`
-	STTSettings STTSettings            `json:"sttSettings,omitempty"`
-	LLMSettings LLMSettings            `json:"llmSettings,omitempty"`
+	STTSettings map[string]interface{} `json:"sttSettings,omitempty"`
+	LLMSettings map[string]interface{} `json:"llmSettings,omitempty"`
 	TTSSettings map[string]interface{} `json:"ttsSettings,omitempty"`
 }
 
 type STTSettings struct {
-	Language                      string  `json:"language"`
-	BeamSize                      int     `json:"beam_size,omitempty"`
-	BestOf                        int     `json:"best_of,omitempty"`
-	Patience                      float64 `json:"patience,omitempty"`
-	NoSpeechThreshold             float64 `json:"no_speech_threshold,omitempty"`
-	Temperature                   float64 `json:"temperature,omitempty"`
-	HallucinationSilenceThreshold float64 `json:"hallucination_silence_threshold,omitempty"`
+	Language                      string   `json:"language,omitempty"`
+	BeamSize                      *int     `json:"beam_size,omitempty"`
+	BestOf                        *int     `json:"best_of,omitempty"`
+	Patience                      *float64 `json:"patience,omitempty"`
+	NoSpeechThreshold             *int     `json:"no_speech_threshold,omitempty"`
+	Temperature                   *float64 `json:"temperature,omitempty"`
+	HallucinationSilenceThreshold *int     `json:"hallucination_silence_threshold,omitempty"`
 }
 
 type LLMSettings struct {
-	Model         string  `json:"model"`
-	SystemPrompt  string  `json:"system_prompt"`
-	Mirostat      int     `json:"mirostat"`
-	MirostatEta   int     `json:"mirostat_eta"`
-	MirostatTau   int     `json:"mirostat_tau"`
-	NumCtx        int     `json:"num_ctx"`
-	RepeatLastN   int     `json:"repeat_last_n"`
-	RepeatPenalty float64 `json:"repeat_penalty"`
-	Temperature   float64 `json:"temperature"`
-	TfsZ          float64 `json:"tfs_z"`
-	NumPredict    int     `json:"num_predict"`
-	TopK          int     `json:"top_k"`
-	TopP          float64 `json:"top_p"`
-	MinP          float64 `json:"min_p"`
+	Model         string   `json:"model"`
+	Seed          *int     `json:"seed,omitempty"`
+	SystemPrompt  *string  `json:"system_prompt"`
+	Mirostat      *int     `json:"mirostat,omitempty"`
+	MirostatEta   *float64 `json:"mirostat_eta,omitempty"`
+	MirostatTau   *float64 `json:"mirostat_tau,omitempty"`
+	NumCtx        *int     `json:"num_ctx,omitempty"`
+	RepeatLastN   *int     `json:"repeat_last_n,omitempty"`
+	RepeatPenalty *float64 `json:"repeat_penalty,omitempty"`
+	Temperature   *float64 `json:"temperature,omitempty"`
+	TfsZ          *float64 `json:"tfs_z,omitempty"`
+	NumPredict    *int     `json:"num_predict,omitempty"`
+	TopK          *int     `json:"top_k,omitempty"`
+	TopP          *float64 `json:"top_p,omitempty"`
+	MinP          *float64 `json:"min_p,omitempty"`
 }
 
 type Message struct {
@@ -147,6 +153,62 @@ func (api *ChatAPI) get(path string) (map[string]interface{}, error) {
 	}
 	defer resp.Body.Close()
 	return parseResponse(resp.Body)
+}
+func (api *ChatAPI) GetSttSettings(chatID string) (*STTSettings, error) {
+	resp, err := api.HTTPClient.Get(api.BaseURL + fmt.Sprintf("/settings/%s/stt", chatID))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get STT settings: received status code %d", resp.StatusCode)
+	}
+
+	var sttSettings STTSettings
+	if err := parseJSONResponse(resp.Body, &sttSettings); err != nil {
+		return nil, fmt.Errorf("error unmarshalling STT settings: %v", err)
+	}
+
+	return &sttSettings, nil
+}
+func (api *ChatAPI) GetLlmSettings(chatID string) (*LLMSettings, error) {
+
+	resp, err := api.HTTPClient.Get(api.BaseURL + fmt.Sprintf("/settings/%s/llm", chatID))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get LLM settings: received status code %d", resp.StatusCode)
+	}
+
+	var llmSettings LLMSettings
+	if err := parseJSONResponse(resp.Body, &llmSettings); err != nil {
+		return nil, fmt.Errorf("error unmarshalling LLM settings: %v", err)
+	}
+
+	return &llmSettings, nil
+}
+
+func (api *ChatAPI) GetTtsSettings(chatID string) (map[string]interface{}, error) {
+	resp, err := api.HTTPClient.Get(api.BaseURL + fmt.Sprintf("/settings/%s/tts", chatID))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get TTS settings: received status code %d", resp.StatusCode)
+	}
+
+	var ttsSettings map[string]interface{}
+	if err := parseJSONResponse(resp.Body, &ttsSettings); err != nil {
+		return nil, fmt.Errorf("error unmarshalling TTS settings: %v", err)
+	}
+
+	return ttsSettings, nil
 }
 
 func (api *ChatAPI) post(path string, data interface{}) (map[string]interface{}, error) {
