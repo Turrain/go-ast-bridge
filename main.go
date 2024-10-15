@@ -222,6 +222,16 @@ func handleInputAudio(conn net.Conn, buffer [][]float32, chatID string, sttSetti
 		TfsZ:          llmSettings.TfsZ,
 		NumPredict:    llmSettings.NumPredict,
 	}
+	log.Println("LLM Option - Seed:", llmSettings.Seed)
+	log.Println("LLM Option - Mirostat:", llmSettings.Mirostat)
+	log.Println("LLM Option - MirostatEta:", llmSettings.MirostatEta)
+	log.Println("LLM Option - MirostatTau:", llmSettings.MirostatTau)
+	log.Println("LLM Option - NumCtx:", llmSettings.NumCtx)
+	log.Println("LLM Option - RepeatLastN:", llmSettings.RepeatLastN)
+	log.Println("LLM Option - RepeatPenalty:", llmSettings.RepeatPenalty)
+	log.Println("LLM Option - TfsZ:", llmSettings.TfsZ)
+	log.Println("LLM Option - NumPredict:", llmSettings.NumPredict)
+
 	log.Println("LLM Options:", llmOptions)
 	excludedWords := []string{"Продолжение следует...", "Субтитры сделал DimaTorzok", "Субтитры создавал DimaTorzok"}
 	for _, word := range excludedWords {

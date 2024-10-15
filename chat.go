@@ -40,7 +40,7 @@ type STTSettings struct {
 	BeamSize                      *int     `json:"beam_size,omitempty"`
 	BestOf                        *int     `json:"best_of,omitempty"`
 	Patience                      *float64 `json:"patience,omitempty"`
-	NoSpeechThreshold             *int     `json:"no_speech_threshold,omitempty"`
+	NoSpeechThreshold             *float64 `json:"no_speech_threshold,omitempty"`
 	Temperature                   *float64 `json:"temperature,omitempty"`
 	HallucinationSilenceThreshold *int     `json:"hallucination_silence_threshold,omitempty"`
 }
