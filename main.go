@@ -220,7 +220,9 @@ func handleInputAudio(conn net.Conn, buffer [][]float32, chatID string, sttSetti
 		RepeatLastN:   llmSettings.RepeatLastN,
 		RepeatPenalty: llmSettings.RepeatPenalty,
 		TfsZ:          llmSettings.TfsZ,
-		NumPredict:    llmSettings.NumPredict,
+		Temperature:   llmSettings.Temperature,
+
+		NumPredict: llmSettings.NumPredict,
 	}
 	log.Println("LLM Option - Seed:", llmSettings.Seed)
 	log.Println("LLM Option - Mirostat:", llmSettings.Mirostat)
@@ -231,6 +233,7 @@ func handleInputAudio(conn net.Conn, buffer [][]float32, chatID string, sttSetti
 	log.Println("LLM Option - RepeatPenalty:", llmSettings.RepeatPenalty)
 	log.Println("LLM Option - TfsZ:", llmSettings.TfsZ)
 	log.Println("LLM Option - NumPredict:", llmSettings.NumPredict)
+	log.Println("LLM Option - Temperature:", llmSettings.Temperature)
 
 	log.Println("LLM Options:", llmOptions)
 	excludedWords := []string{"Продолжение следует...", "Субтитры сделал DimaTorzok", "Субтитры создавал DimaTorzok"}
@@ -269,9 +272,10 @@ func handleInputAudio(conn net.Conn, buffer [][]float32, chatID string, sttSetti
 	}
 
 	data := map[string]interface{}{
-		"message":  *res.Message.Content,
-		"language": "ru",
-		"speed":    1.0,
+		"message":    *res.Message.Content,
+		"language":   "ru",
+		"speed":      1.0,
+		"await_time": 0.015,
 	}
 	log.Println("Using transcription:", transcription)
 
