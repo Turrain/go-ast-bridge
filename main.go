@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"go-ast-client/api"
 	"io"
 	"io/ioutil"
 	"log"
@@ -24,9 +25,18 @@ import (
 	"github.com/pkg/errors"
 )
 
-const slinChunkSize = 320 // 8000Hz * 20ms * 2 bytes
-const websocketURI = "ws://localhost:8011/ws"
-const listenAddr = ":9092"
+const (
+	slinChunkSize   = 320 // 8000Hz * 20ms * 2 bytes
+	websocketURI    = "ws://localhost:8011/ws"
+	listenAddr      = ":9092"
+	ollamaAPIURL    = "http://localhost:11434"
+	chatAPIBaseURL  = "http://127.0.0.1:8009/api"
+	transcribeURL   = "http://localhost:8002/complete_transcribe_r"
+	systemPromptKey = "system_prompt" // Assuming you have a key for system prompt in settings
+)
+
+var chatAPI = api.NewHTTPChatAPI("http://127.0.0.1:8009/api")
+var ollamaAPI = api.NewHTTPollamaAPIClient("http://127.0.0.1:8009/api")
 
 var API = NewChatAPI("http://127.0.0.1:8009/api")
 var LLM = ollama.New(url.URL{Scheme: "http", Host: "localhost:11434"})
@@ -88,56 +98,11 @@ func Handle(pCtx context.Context, c net.Conn) {
 	log.Printf("processing call %s", id.String())
 
 	ChatID := id.String()
-	chat, err := API.GetChat(ChatID)
-
+	log.Println("ChatID:", ChatID)
+	chatStore, err := api.LoadChatStore(ChatID, chatAPI, ollamaAPI)
 	if err != nil {
-		log.Println("chat session doesn't exist, creating new one")
-		_, err = API.StartChat(ChatID)
-		if err != nil {
-			log.Println("failed to start chat session:", err)
-			return
-		}
-	}
-	sttSettings, err := API.GetSttSettings(ChatID)
-	if err != nil {
-		log.Println("failed to get stt settings:", err)
+		log.Println("failed to get chat:", err)
 		return
-	}
-	log.Println("STT Settings:", *sttSettings)
-	llmSettings, err := API.GetLlmSettings(ChatID)
-	if err != nil {
-		log.Println("failed to get llm settings:", err)
-		return
-	}
-	log.Println("LLM Settings:", *llmSettings)
-
-	llmChat := LLM.GetChat(ChatID)
-
-	if llmChat == nil {
-		log.Println("creating new llm chat")
-		_, err := LLM.Chat(&ChatID, LLM.Chat.WithModel("gemma2:9b"))
-		if err != nil {
-			log.Println("failed to get chat:", err)
-			return
-		}
-	}
-	llmChat = LLM.GetChat(ChatID)
-	llmChat.DeleteAllMessages()
-	log.Println("LLM Settings:", *llmSettings)
-	messages := chat.Messages
-
-	systemRole := "system"
-	systemMessage := ollama.Message{
-		Role:    &systemRole,
-		Content: llmSettings.SystemPrompt,
-	}
-	llmChat.AddMessage(systemMessage)
-	for _, message := range messages {
-		message := ollama.Message{
-			Role:    &message.Role,
-			Content: &message.Content,
-		}
-		llmChat.AddMessage(message)
 	}
 
 	rate := 16000
@@ -183,7 +148,7 @@ func Handle(pCtx context.Context, c net.Conn) {
 				if silenceCount > silenceThreshold {
 					if len(inputAudioBuffer) > 0 {
 						log.Println("Processing complete sentence")
-						handleInputAudio(c, inputAudioBuffer, ChatID, *sttSettings, *llmSettings)
+						handleInputAudio(c, inputAudioBuffer, chatStore)
 						inputAudioBuffer = nil // Reset buffer
 					}
 				}
@@ -192,7 +157,10 @@ func Handle(pCtx context.Context, c net.Conn) {
 		}
 	}
 }
-func handleInputAudio(conn net.Conn, buffer [][]float32, chatID string, sttSettings STTSettings, llmSettings LLMSettings) {
+func ptr(s string) *string {
+	return &s
+}
+func handleInputAudio(conn net.Conn, buffer [][]float32, chatStore *api.ChatStore) {
 	// Merge and process buffer, then send to server
 	var mergedBuffer []float32
 	for _, data := range buffer {
@@ -204,13 +172,15 @@ func handleInputAudio(conn net.Conn, buffer [][]float32, chatID string, sttSetti
 		log.Println("Audio length is less than 0.45 seconds, skipping processing.")
 		return
 	}
-	sttSettings.Language = "ru"
+	sttSettings := chatStore.Settings.STTSettings
+	sttSettings.Language = ptr("ru")
+
 	transcription, err := sendFloat32ArrayToServer("http://localhost:8002/complete_transcribe_r", mergedBuffer, sttSettings)
 	if err != nil {
 		log.Println("Error sending data to server:", err)
 		return
 	}
-
+	llmSettings := chatStore.Settings.LLMSettings
 	llmOptions := ollama.Options{
 		Seed:          llmSettings.Seed,
 		Mirostat:      llmSettings.Mirostat,
@@ -221,19 +191,8 @@ func handleInputAudio(conn net.Conn, buffer [][]float32, chatID string, sttSetti
 		RepeatPenalty: llmSettings.RepeatPenalty,
 		TfsZ:          llmSettings.TfsZ,
 		Temperature:   llmSettings.Temperature,
-
-		NumPredict: llmSettings.NumPredict,
+		NumPredict:    llmSettings.NumPredict,
 	}
-	log.Println("LLM Option - Seed:", llmSettings.Seed)
-	log.Println("LLM Option - Mirostat:", llmSettings.Mirostat)
-	log.Println("LLM Option - MirostatEta:", llmSettings.MirostatEta)
-	log.Println("LLM Option - MirostatTau:", llmSettings.MirostatTau)
-	log.Println("LLM Option - NumCtx:", llmSettings.NumCtx)
-	log.Println("LLM Option - RepeatLastN:", llmSettings.RepeatLastN)
-	log.Println("LLM Option - RepeatPenalty:", llmSettings.RepeatPenalty)
-	log.Println("LLM Option - TfsZ:", llmSettings.TfsZ)
-	log.Println("LLM Option - NumPredict:", llmSettings.NumPredict)
-	log.Println("LLM Option - Temperature:", llmSettings.Temperature)
 
 	log.Println("LLM Options:", llmOptions)
 	excludedWords := []string{"Продолжение следует...", "Субтитры сделал DimaTorzok", "Субтитры создавал DimaTorzok"}
@@ -243,36 +202,16 @@ func handleInputAudio(conn net.Conn, buffer [][]float32, chatID string, sttSetti
 			return
 		}
 	}
-	_, err = API.SendMessage(chatID, "user", transcription)
+	log.Println("Transcription:", transcription)
+	response, err := chatStore.SendMessage(transcription)
+	log.Println("Response:", response)
 	if err != nil {
 		log.Println("Error sending user message:", err)
 		return
 	}
-	log.Println("Sent user message:", transcription)
-
-	res, err := LLM.Chat(
-		&chatID,
-		LLM.Chat.WithModel("gemma2:9b"),
-
-		LLM.Chat.WithMessage(ollama.Message{
-			Role:    &UserSender,
-			Content: &transcription,
-		}),
-		LLM.Chat.WithOptions(llmOptions),
-	)
-	if err != nil {
-		log.Println("Error generating Ollama chat:", err)
-		return
-	}
-	log.Println("Received result:", *res.Message.Content)
-	_, err = API.SendMessage(chatID, "assistant", *res.Message.Content)
-	if err != nil {
-		log.Println("Error sending assistant message:", err)
-		return
-	}
 
 	data := map[string]interface{}{
-		"message":    *res.Message.Content,
+		"message":    response.Message.Content,
 		"language":   "ru",
 		"speed":      1.0,
 		"await_time": 0.015,
@@ -333,7 +272,7 @@ func pcmToFloat32Array(pcmData []byte) ([]float32, error) {
 
 	return float32Array, nil
 }
-func sendFloat32ArrayToServer(serverAddress string, float32Array []float32, settings STTSettings) (string, error) {
+func sendFloat32ArrayToServer(serverAddress string, float32Array []float32, settings api.STTSettings) (string, error) {
 	// Buffer to store the audio data
 	var audioBuffer bytes.Buffer
 	for _, f := range float32Array {
@@ -465,7 +404,7 @@ func websocketSendReceive(uri string, data map[string]interface{}, conn net.Conn
 						log.Println("Failed to unmarshal JSON message:", err)
 					}
 				case websocket.BinaryMessage:
-					log.Println("Received binary message:")
+					//	log.Println("Received binary message:")
 					if _, err := audioWriter.Write(message); err != nil {
 						log.Println("Error writing to connection:", err)
 						return
