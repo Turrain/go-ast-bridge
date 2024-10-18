@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/CyCoreSystems/audiosocket"
@@ -197,7 +198,7 @@ func handleInputAudio(conn net.Conn, buffer [][]float32, chatStore *api.ChatStor
 	log.Println("LLM Options:", llmOptions)
 	excludedWords := []string{"Продолжение следует...", "Субтитры сделал DimaTorzok", "Субтитры создавал DimaTorzok"}
 	for _, word := range excludedWords {
-		if transcription == word {
+		if strings.Contains(transcription, word) {
 			log.Println("Transcription contains excluded word, stopping further processing.")
 			return
 		}
@@ -336,9 +337,14 @@ func sendFloat32ArrayToServer(serverAddress string, float32Array []float32, sett
 	}
 
 	// Extract the transcription from the result
+	emotion, ok := result["emotion"].(string)
+	if !ok {
+		return "", fmt.Errorf("emotion not found in response")
+	}
+	log.Println("Emotion:", emotion)
 	if transcription, ok := result["transcription"].(string); ok {
 		log.Println("Transcription:", transcription)
-		return transcription, nil
+		return fmt.Sprintf("[**Emotion:** %s]\n%s", emotion, transcription), nil
 	} else {
 		return "", fmt.Errorf("transcription not found in response")
 	}
